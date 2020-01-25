@@ -1,0 +1,4 @@
+requests
+SwSpotify
+bs4
+PyQt5

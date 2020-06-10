@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QPushButton, QLa
 from bs4 import BeautifulSoup
 from SwSpotify import spotify as sp
 from time import sleep
+import re
 import requests
 import webbrowser
 import xml.etree.ElementTree as ET
@@ -81,6 +82,8 @@ class Window(QMainWindow):
 
 class UiPanel(QWidget):
     def __init__(self, parent):
+        global last_song, last_artist
+
         QWidget.__init__(self)
         self.Parent = parent
 
@@ -108,7 +111,7 @@ class UiPanel(QWidget):
         self.textBrowser = QTextBrowser(self)
         self.textBrowser.setGeometry(QRect(10, 160, 490, 480))
 
-        self.verLbl = QLabel("Version: 4.0", self)
+        self.verLbl = QLabel("Version: 4.1", self)
         self.verLbl.setGeometry(QRect(725, 0, 100, 15))
 
         self.searchLyricsBtn.clicked.connect(self.search_lyrics)
@@ -130,6 +133,8 @@ class UiPanel(QWidget):
             self.searchLyricsBtn.setEnabled(False)
             self.auto_search_checkbox.setChecked(True)
 
+        last_song = sp.song()
+        last_artist = sp.artist()
         self.info_updater()
 
     def auto_search_lyrics(self):
@@ -234,12 +239,13 @@ class LyricsThread(QThread):
         if remote_song_info:
             song_url = remote_song_info['result']['url']
         else:
-            song_url = "The song couldn't be found!"
+            song_url = "The song couldn't be found!\n(Maybe the title on Spotify differs from the one on Genius.com or " \
+                       "there are no lyrics for this song."
             self.lyrics_data.emit(song_url)
             print("ERROR: Couldn't get the song url.")
             return
 
-        self.lyrics_data.emit(scrap_song_url(song_url))
+        self.lyrics_data.emit(scrape_song_url(song_url))
         self.song_info_data.emit(searched_song_info)
         got_error = False
 
@@ -318,12 +324,21 @@ def request_song(song_title, artist_name):
     return response
 
 
-def scrap_song_url(url):
+def scrape_song_url(url):
     global searched_song_info
     try:
         page = requests.get(url)
         html = BeautifulSoup(page.text, 'html.parser')
-        lyrics = html.find('div', class_='lyrics').get_text()
+        old_div = html.find('div', class_="lyrics")
+        new_div = html.find('div', class_="SongPageGrid-sc-1vi6xda-0 DGVcp Lyrics__Root-sc-1ynbvzw-0 jvlKWy")
+        if old_div:
+            lyrics = old_div.get_text()
+        elif new_div:
+            # Clean the lyrics since get_text() fails to convert "</br/>"
+            lyrics = str(new_div)
+            lyrics = lyrics.replace('<br/>', '\n')
+            lyrics = re.sub(r'(\<.*?\>)', '', lyrics)
+
         song_info = html.find('title').get_text()
 
         song_info = song_info.split("Lyrics |")
@@ -332,8 +347,8 @@ def scrap_song_url(url):
 
         lyrics = lyrics.strip()
         return lyrics
-    except:
-        print(f"(ERROR) FATAL ERROR! (Could not acquire lyrics for this song: {url})")
+    except Exception as e:
+        print(f"(ERROR) FATAL ERROR! (Could not acquire lyrics for this song: {url}) -> {str(e)}")
         searched_song_info = "ERROR"
         return "There was an error getting lyrics for this song from Genius. \n" \
                "It's probably a problem with the Genius website for this song.\n" \
